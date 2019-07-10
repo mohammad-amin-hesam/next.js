@@ -2,7 +2,7 @@
 // tslint:disable:no-console
 import { ParsedUrlQuery } from 'querystring'
 import { ComponentType } from 'react'
-import { parse, UrlObject } from 'url'
+import { parse } from 'url'
 
 import mitt, { MittEmitter } from '../mitt'
 import {
@@ -20,8 +20,6 @@ import { isDynamicRoute } from './utils/is-dynamic'
 function toRoute(path: string): string {
   return path.replace(/\/$/, '') || '/'
 }
-
-type Url = UrlObject | string
 
 export type BaseRouter = {
   route: string
@@ -56,7 +54,6 @@ export default class Router implements BaseRouter {
   clc: ComponentLoadCancel
   pageLoader: any
   _bps: BeforePopStateCallback | undefined
-  parsedDynamicRoute?: boolean
 
   static events: MittEmitter = mitt()
 
@@ -214,7 +211,7 @@ export default class Router implements BaseRouter {
    * @param as masks `url` for the browser
    * @param options object you can define `shallow` and other options
    */
-  push(url: Url, as: Url = url, options = {}) {
+  push(url: string, as: string = url, options = {}) {
     return this.change('pushState', url, as, options)
   }
 
@@ -224,11 +221,16 @@ export default class Router implements BaseRouter {
    * @param as masks `url` for the browser
    * @param options object you can define `shallow` and other options
    */
-  replace(url: Url, as: Url = url, options = {}) {
+  replace(url: string, as: string = url, options = {}) {
     return this.change('replaceState', url, as, options)
   }
 
-  change(method: string, _url: Url, _as: Url, options: any): Promise<boolean> {
+  change(
+    method: string,
+    _url: string,
+    _as: string,
+    options: any
+  ): Promise<boolean> {
     return new Promise((resolve, reject) => {
       // If url and as provided as an object representation,
       // we'll format them into the string version here.
@@ -245,16 +247,14 @@ export default class Router implements BaseRouter {
       }
 
       this.abortComponentLoad(as)
-
-      const { pathname, query } = parse(url, true)
-      // @ts-ignore pathname is always a string
-      const route = toRoute(pathname)
-      const { shallow = false } = options
-      const isDynamic = isDynamicRoute(route)
+      const prevUrl = formatWithValidation({
+        pathname: this.pathname,
+        query: this.query,
+      })
 
       // If the url change is only related to a hash change
       // We should not proceed. We should only change the state.
-      if (this.onlyAHashChange(as) && (!isDynamic || this.parsedDynamicRoute)) {
+      if (url === prevUrl && this.onlyAHashChange(as)) {
         this.asPath = as
         Router.events.emit('hashChangeStart', as)
         this.changeState(method, url, as)
@@ -262,6 +262,8 @@ export default class Router implements BaseRouter {
         Router.events.emit('hashChangeComplete', as)
         return resolve(true)
       }
+
+      const { pathname, query } = parse(url, true)
 
       // If asked to change the current URL we should reload the current page
       // (not location.reload() but reload getInitialProps and other Next.js stuffs)
@@ -272,8 +274,11 @@ export default class Router implements BaseRouter {
         method = 'replaceState'
       }
 
+      // @ts-ignore pathname is always a string
+      const route = toRoute(pathname)
+      const { shallow = false } = options
+
       if (isDynamicRoute(route)) {
-        this.parsedDynamicRoute = true
         const { pathname: asPathname } = parse(as)
         const rr = getRouteRegex(route)
         const routeMatch = getRouteMatcher(rr)(asPathname)
